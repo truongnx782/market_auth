@@ -24,25 +24,12 @@ public class AuthenticationController {
     private final AuthenticationService authenticationService;
     private final UserRepository userRepository;
 
-
-    @PostMapping("/validate-url-token")
-    public ResponseEntity<?> validateUrlToken(
-            @RequestParam("url") String url,
-            @RequestParam("token") String token) {
-        boolean isValid = authenticationService.validateUrlToken(url, token);
-
-        if (isValid) {
-            return ResponseEntity.ok("URL and token are valid");
-        } else {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid URL or token");
-        }
-    }
-
     @PostMapping("/login")
     public ResponseEntity<?> authenticate(@RequestBody AuthenticationRequest request) {
         var result = authenticationService.authenticate(request);
         return ResponseEntity.ok()
                 .header("token", result.getToken())
+                .header("uid", result.getUid().toString())
                 .body(result);
     }
 
@@ -88,6 +75,7 @@ public class AuthenticationController {
         var result = authenticationService.authenticate(authenticationRequest);
         return ResponseEntity.ok()
                 .header("token", result.getToken())
+                .header("uid", result.getUid().toString())
                 .body(result);
 
     }
@@ -119,6 +107,7 @@ public class AuthenticationController {
             var result = authenticationService.refreshToken(token);
             return ResponseEntity.ok()
                     .header("token", result.getToken())
+                    .header("uid",result.getUid().toString())
                     .body("Token refreshed successfully");
         } catch (ParseException | JOSEException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Failed to refresh token");

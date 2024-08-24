@@ -63,28 +63,6 @@ public class AuthenticationService {
     @Value("${jwt.refreshable-duration}")
     private long REFRESHABLE_DURATION;
 
-
-    public Long getUserIdFromToken(String token) throws ParseException, JOSEException {
-        SignedJWT signedJWT = SignedJWT.parse(token);
-        JWSVerifier verifier = new MACVerifier(SIGNER_KEY.getBytes());
-
-        if (!signedJWT.verify(verifier)) {
-            throw new AppException(ErrorCode.UNAUTHORIZED);
-        }
-        JWTClaimsSet claimsSet = signedJWT.getJWTClaimsSet();
-        Object userId = claimsSet.getClaim("userId");
-        return (Long) userId;
-    }
-
-    @KafkaListener(topics = "auth-getUserId", groupId = "auth-group")
-    public void listenForGetUserIdRequest(String message) throws ParseException, JOSEException {
-        System.out.println("Received request: " + message);
-        Long userId = getUserIdFromToken(message);
-        kafkaTemplate.send("auth-postUserId", userId);
-    }
-
-
-
     public IntrospectResponse introspect(IntrospectRequest request) throws JOSEException, ParseException {
         var token = request.getToken();
         boolean isValid = true;
@@ -111,7 +89,7 @@ public class AuthenticationService {
 
         var token = generateToken(taiKhoan, role.get());
 
-        return AuthenticationResponse.builder().token(token).build();
+        return AuthenticationResponse.builder().token(token).uid(taiKhoan.getId()).build();
     }
 
     public void logout(String request) throws ParseException, JOSEException {
@@ -331,7 +309,6 @@ public class AuthenticationService {
             throw new AppException(ErrorCode.UNAUTHORIZED);
         }
 
-        // Get 'sub' from JWT claims set
         String username = signedJWT.getJWTClaimsSet().getSubject();
 
         Optional<User> userOptional = userRepository.findByUsername(username);
@@ -342,7 +319,7 @@ public class AuthenticationService {
 
         Map<String, Object> response = new HashMap<>();
         response.put("token", token);
-
+        response.put("uid", userOptional.get().getId());
         return response;
     }
 
@@ -356,7 +333,6 @@ public class AuthenticationService {
             token = token.substring(7);
         }
 
-        // Verify and parse the token
         SignedJWT signedJWT = SignedJWT.parse(token);
 
         // Verify the token and check its expiration
@@ -375,17 +351,6 @@ public class AuthenticationService {
         return AuthenticationResponse.builder()
                 .token(newToken)
                 .build();
-    }
-
-    public boolean validateUrlToken(String url, String token) {
-        try {
-            // Kiểm tra token hợp lệ
-            verifyToken(token, false);
-            return true;
-        } catch (AppException | ParseException | JOSEException e) {
-            log.error("Validation failed: {}", e.getMessage());
-            return false;
-        }
     }
 
     @Scheduled(fixedDelay = 180000)
