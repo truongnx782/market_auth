@@ -9,6 +9,7 @@ import io.jsonwebtoken.Jwt;
 import jakarta.mail.MessagingException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import market.demo.dto.UserDTO;
 import market.demo.dto.request.AuthenticationRequest;
 import market.demo.dto.request.IntrospectRequest;
 import market.demo.dto.request.RegisterRequest;
@@ -40,6 +41,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -48,11 +50,9 @@ public class AuthenticationService {
     private final UserRepository userRepository;
     private final InvalidatedTokenRepository invalidatedTokenRepository;
     private final RoleRepository roleRepository;
-    private final JavaMailSender javaMailSender;
     private final Market_notificationClient market_notificationClient;
     private final Map<String, String> otpCache = new ConcurrentHashMap<>();
     private final KafkaTemplate<String, Object> kafkaTemplate;
-
 
     @Value("${jwt.signerKey}")
     private String SIGNER_KEY;
@@ -77,7 +77,8 @@ public class AuthenticationService {
     }
 
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
-        var taiKhoan = userRepository.findByUsernameAndStatus(request.getUsername(), Utils.ACTIVE).orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_EXISTED));
+        var taiKhoan = userRepository.findByUsernameAndStatus(request.getUsername(), Utils.ACTIVE).orElseThrow(()
+                -> new AppException(ErrorCode.ACCOUNT_NOT_EXISTED));
 
         Optional<Role> role = roleRepository.findById(taiKhoan.getRoleId());
 
@@ -122,7 +123,7 @@ public class AuthenticationService {
                         Instant.now().plus(VALID_DURATION, ChronoUnit.SECONDS).toEpochMilli()))
                 .jwtID(UUID.randomUUID().toString())
                 .claim("roles", roles)
-                .claim("userId",user.getId()) // Thêm userId vào đây
+                .claim("userId",user.getId())
                 .build();
 
         Payload payload = new Payload(jwtClaimsSet.toJSONObject());
@@ -199,6 +200,8 @@ public class AuthenticationService {
             int randomNumber = random.nextInt(9000) + 1000;
             PasswordEncoder passwordEncoder = new BCryptPasswordEncoder(10);
             Map<String, Object> objectMap = new HashMap<>();
+            objectMap.put("fullName", request.getName());
+            objectMap.put("phoneNumber", request.getPhoneNumber());
             objectMap.put("email", request.getEmail());
             objectMap.put("password", passwordEncoder.encode(request.getPassword()));
             objectMap.put("randomNumber", randomNumber);
@@ -214,10 +217,7 @@ public class AuthenticationService {
         }
     }
 
-    public void confirmRegister(String email, String password, String otp) {
-        System.out.println(email);
-        System.out.println(password);
-        System.out.println(otp);
+    public void confirmRegister(String fullName,String phoneNumber, String email, String password, String otp) {
         String storedOtp = otpCache.get(email);
         if (storedOtp == null || !storedOtp.equals(otp)) {
             throw new IllegalArgumentException("Invalid OTP");
@@ -234,6 +234,8 @@ public class AuthenticationService {
         u.setUsername(email);
         u.setStatus(Utils.ACTIVE);
         u.setPassword(password);
+        u.setFullName(fullName);
+        u.setPhoneNumber(phoneNumber);
         u.setRoleId(role.get().getId());
         userRepository.save(u);
     }
@@ -259,7 +261,6 @@ public class AuthenticationService {
         if (user.isEmpty()) {
             throw new IllegalArgumentException("Email not found");
         }
-
 
         Map<String, Object> objectMap = new HashMap<>();
         objectMap.put("email", email);
@@ -293,35 +294,35 @@ public class AuthenticationService {
     }
 
 
-    public Map<String, Object> validateToken(String token) throws ParseException, JOSEException {
-        if (token == null || token.isEmpty()) {
-            throw new IllegalArgumentException("Invalid token");
-        }
-        if (token.startsWith("Bearer ")) {
-            token = token.substring(7);
-        }
-
-        // Verify and parse the token
-        SignedJWT signedJWT = SignedJWT.parse(token);
-        JWSVerifier verifier = new MACVerifier(SIGNER_KEY.getBytes());
-
-        if (!signedJWT.verify(verifier)) {
-            throw new AppException(ErrorCode.UNAUTHORIZED);
-        }
-
-        String username = signedJWT.getJWTClaimsSet().getSubject();
-
-        Optional<User> userOptional = userRepository.findByUsername(username);
-
-        if (userOptional.isEmpty()) {
-            throw new AppException(ErrorCode.ACCOUNT_NOT_EXISTED);
-        }
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("token", token);
-        response.put("uid", userOptional.get().getId());
-        return response;
-    }
+//    public Map<String, Object> validateToken(String token) throws ParseException, JOSEException {
+//        if (token == null || token.isEmpty()) {
+//            throw new IllegalArgumentException("Invalid token");
+//        }
+//        if (token.startsWith("Bearer ")) {
+//            token = token.substring(7);
+//        }
+//
+//        // Verify and parse the token
+//        SignedJWT signedJWT = SignedJWT.parse(token);
+//        JWSVerifier verifier = new MACVerifier(SIGNER_KEY.getBytes());
+//
+//        if (!signedJWT.verify(verifier)) {
+//            throw new AppException(ErrorCode.UNAUTHORIZED);
+//        }
+//
+//        String username = signedJWT.getJWTClaimsSet().getSubject();
+//
+//        Optional<User> userOptional = userRepository.findByUsername(username);
+//
+//        if (userOptional.isEmpty()) {
+//            throw new AppException(ErrorCode.ACCOUNT_NOT_EXISTED);
+//        }
+//
+//        Map<String, Object> response = new HashMap<>();
+//        response.put("token", token);
+//        response.put("uid", userOptional.get().getId());
+//        return response;
+//    }
 
 
     public AuthenticationResponse refreshToken(String token) throws ParseException, JOSEException {
@@ -335,10 +336,8 @@ public class AuthenticationService {
 
         SignedJWT signedJWT = SignedJWT.parse(token);
 
-        // Verify the token and check its expiration
         verifyToken(token, true);
 
-        // Generate a new token
         User user = userRepository.findByUsername(signedJWT.getJWTClaimsSet().getSubject())
                 .orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_EXISTED));
 
@@ -350,12 +349,32 @@ public class AuthenticationService {
 
         return AuthenticationResponse.builder()
                 .token(newToken)
+                .uid(user.getId())
                 .build();
+    }
+
+    public Map<String,Object> getUserById(Map<String, Object> payload) {
+        Long id = Long.valueOf( payload.get("id").toString());
+        Optional<User> user = userRepository.findById(id);
+        if(user.isEmpty()){
+            throw new IllegalArgumentException("user not found");
+        }
+        Map<String,Object> result = new HashMap<>();
+        result.put("id",user.get().getId());
+        result.put("fullName",user.get().getFullName());
+        result.put("email",user.get().getUsername());
+        return result;
+    }
+
+    public List<UserDTO> geAlltUserById(List<Long>ids) {
+    List<User> users = userRepository.findAllById(ids);
+    return users.stream().map(User::toDTO).collect(Collectors.toList());
     }
 
     @Scheduled(fixedDelay = 180000)
     public void autoDeleteUser() {
         otpCache.clear();
     }
+
 
 }

@@ -4,6 +4,7 @@ import com.nimbusds.jose.JOSEException;
 import jakarta.mail.MessagingException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import market.demo.dto.UserDTO;
 import market.demo.dto.request.AuthenticationRequest;
 import market.demo.dto.request.IntrospectRequest;
 import market.demo.dto.request.RegisterRequest;
@@ -11,9 +12,11 @@ import market.demo.repository.UserRepository;
 import market.demo.service.AuthenticationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.text.ParseException;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -24,6 +27,27 @@ public class AuthenticationController {
     private final AuthenticationService authenticationService;
     private final UserRepository userRepository;
 
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/getAll")
+    public ResponseEntity<?> getAll() {
+        var result = userRepository.findAll();
+        return ResponseEntity.ok(result);
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/get-user-by-id")
+    public ResponseEntity<?> getUserById(@RequestBody Map<String,Object> payload) {
+        var result = authenticationService.getUserById(payload);
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/get-all-user-by-id")
+    public ResponseEntity<?> getUserById(@RequestBody List<Long> ids ) {
+        var result = authenticationService.geAlltUserById(ids);
+        return ResponseEntity.ok(result);
+    }
+
+
     @PostMapping("/login")
     public ResponseEntity<?> authenticate(@RequestBody AuthenticationRequest request) {
         var result = authenticationService.authenticate(request);
@@ -31,13 +55,6 @@ public class AuthenticationController {
                 .header("token", result.getToken())
                 .header("uid", result.getUid().toString())
                 .body(result);
-    }
-
-    //    @PreAuthorize("hasRole('USER')")
-    @GetMapping("/getAll")
-    public ResponseEntity<?> getAll() {
-        var result = userRepository.findAll();
-        return ResponseEntity.ok(result);
     }
 
     @PostMapping("/register")
@@ -48,10 +65,12 @@ public class AuthenticationController {
     }
 
     @GetMapping("/confirm-register")
-    public ResponseEntity<?> confirmRegister(@RequestParam("email") String email,
+    public ResponseEntity<?> confirmRegister(@RequestParam("fullName") String fullName,
+                                             @RequestParam("phoneNumber") String phoneNumber,
+                                             @RequestParam("email") String email,
                                              @RequestParam("password") String password,
                                              @RequestParam("otp") String otp) {
-        authenticationService.confirmRegister(email, password, otp);
+        authenticationService.confirmRegister(fullName,phoneNumber, email, password, otp);
         return ResponseEntity.ok("Xác thực tài khoản thành công!");
     }
 
@@ -94,12 +113,12 @@ public class AuthenticationController {
         return ResponseEntity.ok("Xác thực tài khoản thành công!");
     }
 
-    @PostMapping("/check-token")
-    public ResponseEntity<?> validateToken
-            (@RequestHeader("Authorization") String token) throws ParseException, JOSEException {
-        var result = authenticationService.validateToken(token);
-        return ResponseEntity.ok(result);
-    }
+//    @PostMapping("/check-token")
+//    public ResponseEntity<?> validateToken
+//            (@RequestHeader("Authorization") String token) throws ParseException, JOSEException {
+//        var result = authenticationService.validateToken(token);
+//        return ResponseEntity.ok(result);
+//    }
 
     @PostMapping("/refresh-token")
     public ResponseEntity<?> refresh(@RequestHeader("Authorization") String token) {
@@ -113,6 +132,4 @@ public class AuthenticationController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Failed to refresh token");
         }
     }
-
-
 }
